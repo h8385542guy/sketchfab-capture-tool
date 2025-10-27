@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sketchfab 擷取工具</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      background: #111;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #toolbar {
+      padding: 12px 16px;
+      background: #222;
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.6);
+      z-index: 10;
+    }
+
+    #inputWrap {
+      display: flex;
+      flex-direction: column;
+      min-width: 360px;
+      max-width: 640px;
+      flex: 1;
+    }
+
+    label {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
+
+    textarea {
+      width: 100%;
+      min-width: 360px;
+      max-width: 640px;
+      min-height: 60px;
+      max-height: 120px;
+      background: #000;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+      resize: vertical;
+      font-family: Consolas, monospace;
+    }
+
+    .btnRow {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    button {
+      appearance: none;
+      background: #00a0d6;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #fff;
+      font-size: 13px;
+      line-height: 1.2;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:active {
+      transform: scale(.98);
+    }
+
+    #status {
+      font-size: 12px;
+      color: #6cf;
+      text-align: center;
+      min-height: 1.2em;
+    }
+
+    #stageWrap {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+
+    iframe {
+      width: 90vw;
+      height: 80vh;
+      border: none;
+      background: #000;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.8);
+    }
+
+    footer {
+      color: #555;
+      font-size: 11px;
+      padding: 10px 0 20px;
+      text-align: center;
+    }
+  </style>
+
+  <!-- 官方 Sketchfab Viewer SDK (從 Sketchfab CDN 載) -->
+  <script src="https://static.sketchfab.com/api/sketchfab-viewer-1.12.1.js"></script>
+</head>
+<body>
+
+  <div id="toolbar">
+    <div id="inputWrap">
+      <label for="urlInput">
+        貼上 Sketchfab 的 Embed 代碼（整段）或單純的模型網址 /embed：
+      </label>
+      <textarea id="urlInput" placeholder="例如：
+<div class='sketchfab-embed-wrapper'>
+  <iframe src='https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed' ...></iframe>
+</div>
+或是直接貼：
+https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
+    </div>
+
+    <div class="btnRow">
+      <button id="loadBtn">載入模型</button>
+      <button id="captureBtn">擷取目前視角</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="stageWrap">
+    <iframe id="sketchfabFrame" allow="autoplay; fullscreen; xr-spatial-tracking" 
+      allowfullscreen
+      mozallowfullscreen="true"
+      webkitallowfullscreen="true"
+      xr-spatial-tracking
+      execution-while-out-of-viewport
+      execution-while-not-rendered
+      web-share
+    ></iframe>
+  </div>
+
+  <footer>
+    本工具僅用於協助擷取目前視角的平面圖像，不會下載或複製 3D 資產。
+  </footer>
+
+  <script>
+    const iframe = document.getElementById('sketchfabFrame');
+    const statusEl = document.getElementById('status');
+    let api = null;
+
+    function setStatus(msg) {
+      statusEl.textContent = msg || '';
+    }
+
+    function extractUrl(raw) {
+      // 1. 從完整 embed code 中抓 <iframe src=".../embed">
+      //    /[\\s\\S]*? 允許跨行
+      const m1 = raw.match(/src=["'](https:\\/\\/sketchfab\\.com\\/models\\/[\\s\\S]*?\\/embed)["']/i);
+      if (m1 && m1[1]) {
+        return m1[1].trim();
+      }
+
+      // 2. 使用者只貼了模型頁 or /embed
+      //    先抓到 base id
+      const m2 = raw.match(/https:\\/\\/sketchfab\\.com\\/models\\/([a-z0-9]+)/i);
+      if (m2 && m2[1]) {
+        // 如果原本就包含 /embed，我們保留；否則自動補 /embed
+        if (/\\/embed\\b/i.test(raw)) {
+          return `https://sketchfab.com/models/${m2[1]}/embed`;
+        } else {
+          return `https://sketchfab.com/models/${m2[1]}/embed`;
+        }
+      }
+
+      return null;
+    }
+
+    document.getElementById('loadBtn').addEventListener('click', () => {
+      const rawInput = document.getElementById('urlInput').value.trim();
+      if (!rawInput) {
+        alert('請貼上 Sketchfab 連結或 Embed 代碼');
+        return;
+      }
+
+      const url = extractUrl(rawInput);
+      if (!url) {
+        alert('無法識別有效的 Sketchfab 模型連結，請確認輸入內容。');
+        return;
+      }
+
+      setStatus('載入中…');
+      iframe.src = url;
+
+      // 當 iframe 真正載進 DOM 內容後，我們才 init API
+      iframe.onload = initAPI;
+    });
+
+    function initAPI() {
+      setStatus('嘗試初始化檢視器…');
+
+      try {
+        const client = new Sketchfab(iframe);
+
+        client.init(null, {
+          success: function(apiInstance) {
+            api = apiInstance;
+            api.addEventListener('viewerready', () => {
+              setStatus('模型已就緒，可以擷取截圖。');
+            });
+          },
+          error: function() {
+            api = null;
+            setStatus('');
+            alert('載入模型失敗或該連結無法嵌入');
+          }
+        });
+
+      } catch (e) {
+        console.error(e);
+        setStatus('');
+        alert('初始化失敗：' + e.message);
+      }
+    }
+
+    document.getElementById('captureBtn').addEventListener('click', () => {
+      if (!api) {
+        alert('模型尚未載入完成');
+        return;
+      }
+
+      // 擷取 1920x1080 畫面
+      api.getScreenShot(1920, 1080, 'image/png', (err, result) => {
+        if (err) {
+          alert('擷取失敗');
+        } else {
+          // result 是一個 data URL (base64)
+          const a = document.createElement('a');
+          a.href = result;
+          a.download = 'snapshot.png';
+          a.click();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
