@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sketchfab 擷取工具 - Debug版</title>
+  <title>Sketchfab 擷取工具</title>
   <style>
     body {
       font-family: sans-serif;
@@ -169,8 +169,8 @@ https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
   <footer>
     本工具僅用於協助擷取目前視角的平面圖像，不會下載或複製 3D 資產。
   </footer>
-<script src="app.js"></script>
 
+  <!-- 我們自己的主程式，改成外部檔案，避免 CSP 擋 inline script -->
+  <script src="app.js"></script>
 </body>
 </html>
-
