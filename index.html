@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sketchfab 擷取工具</title>
+  <title>Sketchfab 擷取工具 - Debug版</title>
   <style>
     body {
       font-family: sans-serif;
@@ -86,8 +86,18 @@
     #status {
       font-size: 12px;
       color: #6cf;
-      text-align: center;
-      min-height: 1.2em;
+      text-align: left;
+      min-height: 5em;
+      width: calc(100% - 32px);
+      box-sizing: border-box;
+      background: #000;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin: 12px 16px 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-family: Consolas, monospace;
     }
 
     #stageWrap {
@@ -117,7 +127,7 @@
     }
   </style>
 
-  <!-- 官方 Sketchfab Viewer SDK (從 Sketchfab CDN 載) -->
+  <!-- 官方 Sketchfab Viewer SDK -->
   <script src="https://static.sketchfab.com/api/sketchfab-viewer-1.12.1.js"></script>
 </head>
 <body>
@@ -141,10 +151,11 @@ https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
     </div>
   </div>
 
-  <div id="status"></div>
+  <div id="status">（狀態輸出區）</div>
 
   <div id="stageWrap">
-    <iframe id="sketchfabFrame" allow="autoplay; fullscreen; xr-spatial-tracking" 
+    <iframe id="sketchfabFrame"
+      allow="autoplay; fullscreen; xr-spatial-tracking"
       allowfullscreen
       mozallowfullscreen="true"
       webkitallowfullscreen="true"
@@ -164,34 +175,34 @@ https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
     const statusEl = document.getElementById('status');
     let api = null;
 
-    function setStatus(msg) {
-      statusEl.textContent = msg || '';
+    function log(msg) {
+      console.log(msg);
+      statusEl.textContent += "\\n" + msg;
+    }
+
+    function clearStatus() {
+      statusEl.textContent = "";
     }
 
     function extractUrl(raw) {
-      // 1. 從完整 embed code 中抓 <iframe src=".../embed">
-      //    /[\\s\\S]*? 允許跨行
-      const m1 = raw.match(/src=["'](https:\\/\\/sketchfab\\.com\\/models\\/[\\s\\S]*?\\/embed)["']/i);
+      // 允許跨行 ( [\\s\\S]*? )，抓 iframe src=".../embed"
+      const m1 = raw.match(/src=[\"'](https:\\/\\/sketchfab\\.com\\/models\\/[\\s\\S]*?\\/embed)[\"']/i);
       if (m1 && m1[1]) {
         return m1[1].trim();
       }
 
-      // 2. 使用者只貼了模型頁 or /embed
-      //    先抓到 base id
+      // 使用者貼的是一般模型網址
       const m2 = raw.match(/https:\\/\\/sketchfab\\.com\\/models\\/([a-z0-9]+)/i);
       if (m2 && m2[1]) {
-        // 如果原本就包含 /embed，我們保留；否則自動補 /embed
-        if (/\\/embed\\b/i.test(raw)) {
-          return `https://sketchfab.com/models/${m2[1]}/embed`;
-        } else {
-          return `https://sketchfab.com/models/${m2[1]}/embed`;
-        }
+        return `https://sketchfab.com/models/${m2[1]}/embed`;
       }
 
       return null;
     }
 
     document.getElementById('loadBtn').addEventListener('click', () => {
+      clearStatus();
+
       const rawInput = document.getElementById('urlInput').value.trim();
       if (!rawInput) {
         alert('請貼上 Sketchfab 連結或 Embed 代碼');
@@ -199,41 +210,53 @@ https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
       }
 
       const url = extractUrl(rawInput);
+      log("使用者輸入(raw): " + rawInput);
+      log("解析得到(url): " + url);
+
       if (!url) {
         alert('無法識別有效的 Sketchfab 模型連結，請確認輸入內容。');
+        log("❌ 無法解析網址");
         return;
       }
 
-      setStatus('載入中…');
       iframe.src = url;
+      log("已設定 iframe.src，等待 iframe onload …");
 
-      // 當 iframe 真正載進 DOM 內容後，我們才 init API
-      iframe.onload = initAPI;
+      iframe.onload = () => {
+        log("iframe 已 onload，開始 initAPI()");
+        initAPI();
+      };
     });
 
     function initAPI() {
-      setStatus('嘗試初始化檢視器…');
+      log("initAPI() 呼叫中…");
+
+      // 保險：如果 Sketchfab SDK 還沒載到，這裡會直接報
+      if (typeof Sketchfab === "undefined") {
+        log("❌ Sketchfab SDK 尚未載入 (Sketchfab is undefined)");
+        alert("Sketchfab SDK 尚未載入，請稍後重試或檢查網路。");
+        return;
+      }
 
       try {
         const client = new Sketchfab(iframe);
-
         client.init(null, {
           success: function(apiInstance) {
             api = apiInstance;
+            log("✅ initAPI 成功，等待 viewerready…");
+
             api.addEventListener('viewerready', () => {
-              setStatus('模型已就緒，可以擷取截圖。');
+              log("✅ viewerready：模型已就緒，可以擷取截圖");
             });
           },
           error: function() {
             api = null;
-            setStatus('');
+            log("❌ initAPI 回傳 error()");
             alert('載入模型失敗或該連結無法嵌入');
           }
         });
-
       } catch (e) {
-        console.error(e);
-        setStatus('');
+        log("❌ initAPI() throw: " + e.message);
         alert('初始化失敗：' + e.message);
       }
     }
@@ -241,15 +264,17 @@ https://sketchfab.com/models/xxxxxxxxxxxxxxxxxxxx/embed"></textarea>
     document.getElementById('captureBtn').addEventListener('click', () => {
       if (!api) {
         alert('模型尚未載入完成');
+        log("擷取失敗：api 尚未就緒");
         return;
       }
 
-      // 擷取 1920x1080 畫面
+      log("呼叫 api.getScreenShot …");
       api.getScreenShot(1920, 1080, 'image/png', (err, result) => {
         if (err) {
+          log("❌ getScreenShot err: " + err);
           alert('擷取失敗');
         } else {
-          // result 是一個 data URL (base64)
+          log("✅ getScreenShot 成功，下載 snapshot.png");
           const a = document.createElement('a');
           a.href = result;
           a.download = 'snapshot.png';
